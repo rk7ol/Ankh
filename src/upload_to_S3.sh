@@ -52,7 +52,4 @@ aws "${aws_args[@]}" s3 cp "${SCRIPT_DIR}/infer.py" "${base_uri%/}/infer.py" --o
 aws "${aws_args[@]}" s3 cp "${SCRIPT_DIR}/requirements.txt" "${base_uri%/}/requirements.txt" --only-show-errors "${aws_dryrun[@]}"
 aws "${aws_args[@]}" s3 cp "${SCRIPT_DIR}/run_infer.sh" "${base_uri%/}/run_infer.sh" --only-show-errors "${aws_dryrun[@]}"
 
-# Still sync shared templates so SageMaker `run_infer.sh` can `source $CODE_DIR/templates/...`.
-aws "${aws_args[@]}" s3 sync "${REPO_ROOT}/templates" "${base_uri%/}/templates" --only-show-errors "${aws_dryrun[@]}"
-
 echo "Done."
