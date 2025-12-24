@@ -1,19 +1,58 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# If invoked with `sh upload_to_S3.sh`, re-exec under bash.
+if [[ -z "${BASH_VERSION:-}" ]]; then
+  exec bash "$0" "$@"
+fi
+
+usage() {
+  cat <<'EOF'
+Usage:
+  ./upload_to_S3.sh [--profile PROFILE] [--region REGION] [--dryrun] [--base-uri S3_URI]
+EOF
+}
+
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd -- "${SCRIPT_DIR}/../.." && pwd)"
 
-# shellcheck source=/dev/null
-source "${REPO_ROOT}/templates/bash/s3_upload.sh"
-
 S3_BASE_URI_DEFAULT="s3://plm-ml/code/ankh"
+base_uri="${S3_BASE_URI:-${S3_BASE_URI_DEFAULT}}"
 
-UPLOAD_SYNC_REL=("ankh")
-UPLOAD_CP_REL=("infer.py" "requirements.txt" "run_infer.sh")
-UPLOAD_SYNC_EXCLUDES=(--exclude "*__pycache__*" --exclude "*.pyc")
+aws_args=()
+dryrun=0
 
-# Make templates available inside the SageMaker container at: ${CODE_DIR}/templates/...
-UPLOAD_SYNC_BASE=("${REPO_ROOT}/templates::templates")
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --profile) aws_args+=(--profile "$2"); shift 2;;
+    --region) aws_args+=(--region "$2"); shift 2;;
+    --dryrun) dryrun=1; shift;;
+    --base-uri) base_uri="$2"; shift 2;;
+    -h|--help) usage; exit 0;;
+    *) echo "ERROR: Unknown arg: $1" >&2; usage; exit 2;;
+  esac
+done
 
-s3_upload_main "$@"
+command -v aws >/dev/null 2>&1 || { echo "ERROR: Missing command in PATH: aws" >&2; exit 1; }
+[[ -n "${base_uri}" ]] || { echo "ERROR: Missing S3 base uri." >&2; exit 1; }
+
+echo "Uploading to: ${base_uri}"
+
+aws_dryrun=()
+if [[ "${dryrun}" -eq 1 ]]; then
+  aws_dryrun+=(--dryrun)
+fi
+
+# Project code
+aws "${aws_args[@]}" s3 sync "${SCRIPT_DIR}/ankh" "${base_uri%/}/ankh" \
+  --only-show-errors "${aws_dryrun[@]}" \
+  --exclude "*__pycache__*" --exclude "*.pyc"
+
+aws "${aws_args[@]}" s3 cp "${SCRIPT_DIR}/infer.py" "${base_uri%/}/infer.py" --only-show-errors "${aws_dryrun[@]}"
+aws "${aws_args[@]}" s3 cp "${SCRIPT_DIR}/requirements.txt" "${base_uri%/}/requirements.txt" --only-show-errors "${aws_dryrun[@]}"
+aws "${aws_args[@]}" s3 cp "${SCRIPT_DIR}/run_infer.sh" "${base_uri%/}/run_infer.sh" --only-show-errors "${aws_dryrun[@]}"
+
+# Still sync shared templates so SageMaker `run_infer.sh` can `source $CODE_DIR/templates/...`.
+aws "${aws_args[@]}" s3 sync "${REPO_ROOT}/templates" "${base_uri%/}/templates" --only-show-errors "${aws_dryrun[@]}"
+
+echo "Done."
